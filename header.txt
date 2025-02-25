@@ -1,10 +1,9 @@
 // ==UserScript==
-// @name         模板项目
-// @author       作者名
+// @name         Dice Roll Stat
+// @author       Conatsu
 // @version      1.0.0
-// @description  这是海豹的js扩展模板项目，请自行修改信息
-// @timestamp    1674477074
-// 2023/1/23
+// @description  A script to count success and failure instances of dice rolls.
+// @timestamp    2025-02-25
 // @license      MIT
-// @homepageURL  https://github.com/sealdice/sealdice-js-template
+// @homepageURL  https://github.com/zihao-xia/dice-roll-stat
 // ==/UserScript==

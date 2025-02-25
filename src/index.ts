@@ -1,38 +1,132 @@
-import { sample } from "lodash-es";
-import { nameList } from "./utils";
+interface RollResult {
+  total: number;
+  success: number;
+  hardSuccess: number;
+  extremeSuccess: number;
+  criticalSuccess: number;
+  failure: number;
+  criticalFailure: number;
+}
 
 function main() {
   // 注册扩展
-  let ext = seal.ext.find('test');
+  let ext = seal.ext.find('dice-roll-stat');
   if (!ext) {
-    ext = seal.ext.new('test', '木落', '1.0.0');
+    ext = seal.ext.new('dice-roll-stat', 'Conatsu', '1.0.0');
     seal.ext.register(ext);
   }
 
-  // 编写指令
-  const cmdSeal = seal.ext.newCmdItemInfo();
-  cmdSeal.name = 'seal';
-  cmdSeal.help = '召唤一只海豹，可用.seal <名字> 命名';
+  // ================= 统计指令 =================
+  const cmdStat = seal.ext.newCmdItemInfo();
+  cmdStat.name = '骰点统计';
+  cmdStat.help = '统计历史骰点信息';
 
-  cmdSeal.solve = (ctx, msg, cmdArgs) => {
-    let val = cmdArgs.getArgN(1);
-    switch (val) {
-      case 'help': {
-        const ret = seal.ext.newCmdExecuteResult(true);
-        ret.showHelp = true;
-        return ret;
-      }
-      default: {
-        // 命令为 .seal XXXX，取第一个参数为名字
-        if (!val) val = sample(nameList); // 无参数，随机名字
-        seal.replyToSender(ctx, msg, `你抓到一只海豹！取名为${val}\n它的逃跑意愿为${Math.ceil(Math.random() * 100)}`);
-        return seal.ext.newCmdExecuteResult(true);
-      }
+  cmdStat.solve = (ctx, msg) => {
+    const { userId, nickname } = msg.sender;
+
+    const storageKey = `rollStats_${userId}`;
+    const storedData = ext.storageGet(storageKey);
+    const data: RollResult = storedData
+      ? JSON.parse(storedData)
+      : {
+          total: 0,
+          success: 0,
+          hardSuccess: 0,
+          extremeSuccess: 0,
+          criticalSuccess: 0,
+          failure: 0,
+          criticalFailure: 0,
+        };
+
+    const { total } = data;
+    const successRate =
+      total > 0
+        ? (
+            ((data.success +
+              data.hardSuccess +
+              data.extremeSuccess +
+              data.criticalSuccess) /
+              total) *
+            100
+          ).toFixed(1)
+        : 0;
+
+    const text = `${nickname} 的骰点统计为
+      大成功: ${data.criticalSuccess}
+      极难成功: ${data.extremeSuccess}
+      困难成功: ${data.hardSuccess}
+      成功: ${data.success}
+      失败: ${data.failure}
+      大失败: ${data.criticalFailure}
+      成功率: ${successRate}%
+      总次数: ${total}`;
+
+    seal.replyToSender(ctx, msg, text);
+    return seal.ext.newCmdExecuteResult(true);
+  };
+
+  // ================= 骰点指令 =================
+  const cmdRoll = seal.ext.newCmdItemInfo();
+  cmdRoll.name = 'st'; // 示例检定指令
+  cmdRoll.help = '进行属性检定 格式：st 目标值';
+
+  cmdRoll.solve = (ctx, msg, cmdArgs) => {
+    const val = cmdArgs.getArgN(1);
+    const target = parseInt(val);
+    if (isNaN(target)) {
+      seal.replyToSender(ctx, msg, '检定格式错误，示例：st 50');
+      return seal.ext.newCmdExecuteResult(true);
     }
-  }
+
+    const roll = Math.ceil(Math.random() * 100);
+    const { userId } = msg.sender;
+
+    // 记录检定结果
+    const storageKey = `rollStats_${userId}`;
+    const storedData = ext.storageGet(storageKey);
+    const data: RollResult = storedData
+      ? JSON.parse(storedData)
+      : {
+          total: 0,
+          success: 0,
+          hardSuccess: 0,
+          extremeSuccess: 0,
+          criticalSuccess: 0,
+          failure: 0,
+          criticalFailure: 0,
+        };
+
+    let resultText = '';
+    if (roll <= Math.floor(target / 5)) {
+      data.criticalSuccess++;
+      resultText = `大成功！`;
+    } else if (roll <= Math.floor(target / 2)) {
+      data.extremeSuccess++;
+      resultText = `极难成功！`;
+    } else if (roll <= target) {
+      data.hardSuccess++;
+      resultText = `困难成功！`;
+    } else if (roll < 100) {
+      data.failure++;
+      resultText = `失败！`;
+    } else {
+      data.criticalFailure++;
+      resultText = `大失败！`;
+    }
+
+    data.total++;
+    ext.storageSet(storageKey, JSON.stringify(data));
+
+    seal.replyToSender(
+      ctx,
+      msg,
+      `检定结果: D100=${roll}/${target} ${resultText}`
+    );
+    return seal.ext.newCmdExecuteResult(true);
+  };
 
   // 注册命令
-  ext.cmdMap['seal'] = cmdSeal;
+  ext.cmdMap['骰点统计'] = cmdStat;
 }
 
 main();
