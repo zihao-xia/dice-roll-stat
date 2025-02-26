@@ -36,7 +36,7 @@ function main() {
     if (match) {
       const d100 = parseInt(match[1]);
       const checkValue = parseInt(match[2]);
-      const { userId } = msg.sender;
+      const { userId, nickname } = msg.sender;
 
       // 使用当前COC规则进行检定
       const rule = seal.coc.newRule();
@@ -48,7 +48,7 @@ function main() {
       const data: RollResult = storedData
         ? JSON.parse(storedData)
         : {
-            nickname: msg.sender.nickname,
+            nickname,
             total: 0,
             [SUCCESS_RANK.CRITICAL_SUCCESS]: 0,
             [SUCCESS_RANK.EXTREME_SUCCESS]: 0,
@@ -80,7 +80,7 @@ function main() {
           break;
       }
 
-      data.nickname = msg.sender.nickname;
+      data.nickname = nickname;
 
       ext.storageSet(storageKey, JSON.stringify(data));
     }
