@@ -1,11 +1,23 @@
+// 在 RollResult 接口前添加 COC 成功等级常量
+const SUCCESS_RANK = {
+  CRITICAL_FAILURE: -2,
+  FAILURE: -1,
+  SUCCESS: 1,
+  HARD_SUCCESS: 2,
+  EXTREME_SUCCESS: 3,
+  CRITICAL_SUCCESS: 4,
+} as const;
+
+// 修改 RollResult 接口定义
 interface RollResult {
+  nickname: string;
   total: number;
-  success: number;
-  hardSuccess: number;
-  extremeSuccess: number;
-  criticalSuccess: number;
-  failure: number;
-  criticalFailure: number;
+  [SUCCESS_RANK.CRITICAL_SUCCESS]: number;
+  [SUCCESS_RANK.EXTREME_SUCCESS]: number;
+  [SUCCESS_RANK.HARD_SUCCESS]: number;
+  [SUCCESS_RANK.SUCCESS]: number;
+  [SUCCESS_RANK.FAILURE]: number;
+  [SUCCESS_RANK.CRITICAL_FAILURE]: number;
 }
 
 function main() {
@@ -16,112 +28,114 @@ function main() {
     seal.ext.register(ext);
   }
 
-  // ================= 统计指令 =================
-  const cmdStat = seal.ext.newCmdItemInfo();
-  cmdStat.name = '骰点统计';
-  cmdStat.help = '统计历史骰点信息';
+  // ================= 消息监听处理 =================
+  ext.onMessageReceived = (ctx, msg) => {
+    const text = msg.message.trim();
+    const match = text.match(/D100=(\d+)\/(\d+)(\((.+)\))?/);
 
-  cmdStat.solve = (ctx, msg) => {
-    const { userId, nickname } = msg.sender;
+    if (match) {
+      const d100 = parseInt(match[1]);
+      const checkValue = parseInt(match[2]);
+      const { userId } = msg.sender;
 
-    const storageKey = `rollStats_${userId}`;
-    const storedData = ext.storageGet(storageKey);
-    const data: RollResult = storedData
-      ? JSON.parse(storedData)
-      : {
-          total: 0,
-          success: 0,
-          hardSuccess: 0,
-          extremeSuccess: 0,
-          criticalSuccess: 0,
-          failure: 0,
-          criticalFailure: 0,
-        };
+      // 使用当前COC规则进行检定
+      const rule = seal.coc.newRule();
+      const checkResult = rule.check(ctx, d100, checkValue);
 
-    const { total } = data;
-    const successRate =
-      total > 0
-        ? (
-            ((data.success +
-              data.hardSuccess +
-              data.extremeSuccess +
-              data.criticalSuccess) /
-              total) *
-            100
-          ).toFixed(1)
-        : 0;
+      // 更新统计
+      const storageKey = `rollStats_${userId}`;
+      const storedData = ext.storageGet(storageKey);
+      const data: RollResult = storedData
+        ? JSON.parse(storedData)
+        : {
+            nickname: msg.sender.nickname,
+            total: 0,
+            [SUCCESS_RANK.CRITICAL_SUCCESS]: 0,
+            [SUCCESS_RANK.EXTREME_SUCCESS]: 0,
+            [SUCCESS_RANK.HARD_SUCCESS]: 0,
+            [SUCCESS_RANK.SUCCESS]: 0,
+            [SUCCESS_RANK.FAILURE]: 0,
+            [SUCCESS_RANK.CRITICAL_FAILURE]: 0,
+          };
 
-    const text = `${nickname} 的骰点统计为
-      大成功: ${data.criticalSuccess}
-      极难成功: ${data.extremeSuccess}
-      困难成功: ${data.hardSuccess}
-      成功: ${data.success}
-      失败: ${data.failure}
-      大失败: ${data.criticalFailure}
-      成功率: ${successRate}%
-      总次数: ${total}`;
+      data.total++;
+      switch (checkResult.successRank) {
+        case SUCCESS_RANK.CRITICAL_SUCCESS:
+          data[SUCCESS_RANK.CRITICAL_SUCCESS]++;
+          break;
+        case SUCCESS_RANK.EXTREME_SUCCESS:
+          data[SUCCESS_RANK.EXTREME_SUCCESS]++;
+          break;
+        case SUCCESS_RANK.HARD_SUCCESS:
+          data[SUCCESS_RANK.HARD_SUCCESS]++;
+          break;
+        case SUCCESS_RANK.SUCCESS:
+          data[SUCCESS_RANK.SUCCESS]++;
+          break;
+        case SUCCESS_RANK.FAILURE:
+          data[SUCCESS_RANK.FAILURE]++;
+          break;
+        case SUCCESS_RANK.CRITICAL_FAILURE:
+          data[SUCCESS_RANK.CRITICAL_FAILURE]++;
+          break;
+      }
 
-    seal.replyToSender(ctx, msg, text);
-    return seal.ext.newCmdExecuteResult(true);
+      data.nickname = msg.sender.nickname;
+
+      ext.storageSet(storageKey, JSON.stringify(data));
+    }
   };
 
-  // ================= 骰点指令 =================
-  const cmdRoll = seal.ext.newCmdItemInfo();
-  cmdRoll.name = 'st'; // 示例检定指令
-  cmdRoll.help = '进行属性检定 格式：st 目标值';
+  // ================= 完善统计指令 =================
+  const cmdStat = seal.ext.newCmdItemInfo();
+  cmdStat.name = '骰点统计';
+  cmdStat.help = `统计历史骰点信息
+用法：.骰点统计 [用户ID]（仅管理员可用）`;
 
-  cmdRoll.solve = (ctx, msg, cmdArgs) => {
-    const val = cmdArgs.getArgN(1);
-    const target = parseInt(val);
-    if (isNaN(target)) {
-      seal.replyToSender(ctx, msg, '检定格式错误，示例：st 50');
+  cmdStat.solve = (ctx, msg, cmdArgs) => {
+    const targetUserId = cmdArgs.getArgN(1) || msg.sender.userId;
+    const isAdmin = ctx.privilegeLevel >= 50;
+
+    // 权限检查
+    if (targetUserId !== msg.sender.userId && !isAdmin) {
+      seal.replyToSender(ctx, msg, '你没有权限查看他人的骰点统计');
       return seal.ext.newCmdExecuteResult(true);
     }
 
-    const roll = Math.ceil(Math.random() * 100);
-    const { userId } = msg.sender;
-
-    // 记录检定结果
-    const storageKey = `rollStats_${userId}`;
+    const storageKey = `rollStats_${targetUserId}`;
     const storedData = ext.storageGet(storageKey);
-    const data: RollResult = storedData
-      ? JSON.parse(storedData)
-      : {
-          total: 0,
-          success: 0,
-          hardSuccess: 0,
-          extremeSuccess: 0,
-          criticalSuccess: 0,
-          failure: 0,
-          criticalFailure: 0,
-        };
 
-    let resultText = '';
-    if (roll <= Math.floor(target / 5)) {
-      data.criticalSuccess++;
-      resultText = `大成功！`;
-    } else if (roll <= Math.floor(target / 2)) {
-      data.extremeSuccess++;
-      resultText = `极难成功！`;
-    } else if (roll <= target) {
-      data.hardSuccess++;
-      resultText = `困难成功！`;
-    } else if (roll < 100) {
-      data.failure++;
-      resultText = `失败！`;
-    } else {
-      data.criticalFailure++;
-      resultText = `大失败！`;
+    if (!storedData) {
+      seal.replyToSender(ctx, msg, '暂无骰点统计数据');
+      return seal.ext.newCmdExecuteResult(true);
     }
 
-    data.total++;
-    ext.storageSet(storageKey, JSON.stringify(data));
+    const data: RollResult = JSON.parse(storedData);
+    const total = data.total || 0;
 
-    seal.replyToSender(
-      ctx,
-      msg,
-      `检定结果: D100=${roll}/${target} ${resultText}`
-    );
+    const successCount =
+      data[SUCCESS_RANK.SUCCESS] +
+      data[SUCCESS_RANK.HARD_SUCCESS] +
+      data[SUCCESS_RANK.EXTREME_SUCCESS] +
+      data[SUCCESS_RANK.CRITICAL_SUCCESS];
+
+    const successRate =
+      total > 0 ? ((successCount / total) * 100).toFixed(1) : '0.0';
+
+    const text = `骰点统计${
+      targetUserId !== msg.sender.userId ? `（用户 ${data.nickname}）` : ''
+    }
+${data.nickname} 的骰点统计：
+大成功: ${data[SUCCESS_RANK.CRITICAL_SUCCESS]}
+极难成功: ${data[SUCCESS_RANK.EXTREME_SUCCESS]}
+困难成功: ${data[SUCCESS_RANK.HARD_SUCCESS]}
+成功: ${data[SUCCESS_RANK.SUCCESS]}
+失败: ${data[SUCCESS_RANK.FAILURE]}
+大失败: ${data[SUCCESS_RANK.CRITICAL_FAILURE]}
+成功率: ${successRate}%
+总次数: ${total}`;
+
+    seal.replyToSender(ctx, msg, text);
     return seal.ext.newCmdExecuteResult(true);
   };
 
